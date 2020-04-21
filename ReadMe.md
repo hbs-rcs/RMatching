@@ -1,5 +1,9 @@
 # Causal Inference via Matching in R
 
+April, 2020
+
+Author: Victoria L. Prince ([vliublinska](https://github.com/vliublinska))
+
 ## Overview
 
 This workshop provides a step-by-step guide on how to preprocess data using matching methods for the purpose
