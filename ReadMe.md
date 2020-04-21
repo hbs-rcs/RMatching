@@ -1,7 +1,5 @@
 # Causal Inference via Matching in R
 
-Contact: [Research Computing Services](https://training.rcs.hbs.org/) ([research@hbs.edu](mailto:research@hbs.edu))  
-
 ## Overview
 
 This workshop provides a step-by-step guide on how to preprocess data using matching methods for the purpose
