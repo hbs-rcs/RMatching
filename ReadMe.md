@@ -1,6 +1,8 @@
 # Causal Inference via Matching in R
 
-Contact: [Research Computing Services](https://training.rcs.hbs.org/) ([research@hbs.edu](mailto:research@hbs.edu))  
+April, 2020
+
+Author: Victoria L. Prince ([vliublinska](https://github.com/vliublinska))
 
 ## Overview
 
