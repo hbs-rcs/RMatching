@@ -1,0 +1,734 @@
+---
+title: "Causal Inference via Matching in R"
+author: Victoria L. Prince, Research Computing Services, HBS
+date: April 24, 2020
+output:
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: false
+---
+
+```{r, echo=FALSE, results=FALSE, eval=TRUE}
+options(max.print = 100)
+```
+
+# Setup
+
+## Software and Prerequisites
+
+This is an advanced R course:
+
+* Assumes working knowledge of R
+* Relatively fast-paced
+
+Follow these [R Installation](https://iqss.github.io/dss-workshops/Rinstall.html) instructions 
+and ensure that you can successfully start RStudio.
+
+Ask questions at any time during the workshop!
+
+## Goals
+
+<div class="alert alert-success">
+We will learn about the tools available in R to perform matching for the purpose of causal 
+inference. We will also practice going through a recommended workflow for executing some of the 
+matching algorithms. In particular, our goals are to learn about:
+
+* Estimating a treatment effect in experimental data
+* Adjusting for covariates in observational studies
+* Balance checking between exposure group and control group
+* Identifying the region of common support
+* R tools for matching
+* Matching workflow
+
+</div>
+
+## Launch an R session
+
+Start RStudio and create a new project:
+
+* On Windows click the start button and search for RStudio. On Mac
+    RStudio will be in your applications folder.
+* In Rstudio go to `File -> New Project`.
+* Choose `Existing Directory` and browse to the workshop materials directory on your desktop.
+* Choose `File -> Open File` and select the file with the word "BLANK" in the name.
+
+## Packages
+
+Let's install (if needed) and load R packages that will aid with data wrangling and 
+rendering RMarkdown documents: 
+
+```{r, message=FALSE}
+# install.packages("tidyverse")
+library(tidyverse)
+
+# install.packages("rmarkdown")
+library(rmarkdown)
+```
+
+Next, lets add some packages that will help with matching:
+
+```{r, message=FALSE}
+# install.packages("MatchIt")
+library(MatchIt) # for propensity score matching
+
+# install.packages("cem")
+library(cem) # for coarsened exact matching
+
+# install.packages("RItools")
+library(RItools) # for displaying balance statistics
+
+# install.packages("cobalt")
+library(cobalt) # for displaying balance statistics
+```
+
+# NSW Example
+
+We will use a classic example data set from a National Supported Work (NSW) Study conducted in 1970's 
+and designed to test whether and to what extent a temporary employment in a supportive but 
+performance-oriented environment would equip hard-to-employ people to get and hold normal jobs. 
+
+## Background
+
+Here are some facts about the study and subsequent use of the data it generated:
+
+* Multisite randomized experiment; found that training raised yearly earnings by about $800 for 
+male participants
+* Lalonde (1986) tried to use (then) existing non-experimental methods to recover this effect:
+  * Used randomized treatment group, but replaced the control group with comparison groups from 
+  large publicly available datasets, including the Current Population Survey (CPS) and the 
+  Population Survey of Income Dynamics (PSID)
+  * Caveat - used almost everyone from the selected surveys
+  * Found that none of the tried methods did very well; results all over the place 
+  (-\$16,000 to \$7,000)
+* Dehejia and Wahba (DW, 1999) used the matching approach to select people from the CPS 
+**who looked the most similar to the treated individuals** and were able to recover the effect from the experiment!
+
+Let's load the data and examine it.
+
+```{r}
+## Data is hosted on one of the authors' web-site
+
+nsw_dw <- haven::read_dta("http://www.nber.org/~rdehejia/data/nsw_dw.dta") 
+## Note that this data set is a subset of the original data, excluding subject with missing information
+## on prior earnings
+
+PSID <- haven::read_dta("http://www.nber.org/~rdehejia/data/psid_controls.dta")
+
+## If the server seems overloaded, please load locally:
+# nsw_dw <- haven::read_dta("data/nsw_dw.dta")
+# PSID <- haven::read_dta("data/psid_controls.dta")
+```
+
+```{r}
+# Examine the NSW data
+dim(nsw_dw)
+str(nsw_dw)
+head(nsw_dw)
+summary(nsw_dw)
+table(nsw_dw$treat)
+```
+
+```{r}
+# Examine the PSID data
+dim(PSID)
+str(PSID)
+head(PSID)
+summary(PSID)
+```
+
+## Data Set
+
+Dehejia-Wahha's sample represents a subset of the original experimental data, where
+subjects have information on earnings in 1974 (important for ignorability assumption):
+
+* 445 subjects, with 185 treated
+* Treatment: participation in job training (`treat`)
+* Outcome: income in 1978 dollars (`re78`)
+* Controls/confounders: `age`, years of `education`, high school degree (`nodegree`), 
+`black`, `hispanic`, `married`, real earnings in 1974 (`re74`) and 1975 (`re75`)
+
+PSID: Non-experimental comparison group constructed by Lalonde from the PSID
+
+* ~2500 subjects  
+* Treatment (`treat`, all 0)
+* Same controls and outcome as in NSW
+
+# Matching workflow
+
+As we discussed during the lecture portion, there is a suggested sequence of  
+steps when applying matching techniques:
+
+1. Pre-analysis of non-matched data
+2. Matching
+3. Checking balance post-matching; repeat 2-3 as needed
+
+Throughout this workshop we will repeat some of the steps and try out several matching methods.
+
+## Exercise 0
+
+**Treatment effect from experimental data**
+
+Since the original data set came from a randomized experiment, a *gold standard*"* of 
+causal inference, we can estimate the true treatment effect. 
+
+1. Use OLS regression to estimate the difference between average outcomes. 
+```{r}
+##
+```
+
+2. Repeat the calculation controlling for pre-intervention covariates.
+```{r}
+##
+```
+
+3. Discuss the following:
+
+a) What do you notice about the treatment effect estimate from the two models?
+a) Pros/cons of controlling for pre-intervention variables in a context of a randomized experiment.
+
+<details>
+  <summary><span style="color:red"><b>Click for Exercise 0 Solution</b></span></summary>
+  <div class="alert alert-danger">
+
+1. Use OLS regression to estimate the difference between average outcomes. 
+```{r}
+# Marginal difference between means
+marg_mod <- lm(re78 ~ treat, data=nsw_dw)
+summary(marg_mod)
+confint(marg_mod)
+```
+
+2. Repeat the calculation controlling for pre-intervention covariates.
+```{r}
+# Treatment effect using regression adjustment
+cond_mod <- lm(re78 ~ treat + age + education + black + hispanic + 
+                 nodegree + married + re74 + re75, 
+                data = nsw_dw)
+summary(cond_mod)
+confint(cond_mod)
+```
+
+3. Discuss the following:
+
+a) What do you notice about treatment effect estimates from the two models?
+a) Pros/cons of controlling for pre-intervention variables in a context of a randomized experiment.
+
+Answer:
+
+a) The estimated treatment effects are very similar (\$1,794.3 vs. \$1,676). There is also 
+considerable overlap between their 95% intervals: (551, 3038) vs. (421, 2932).
+The estimates are statistically (and practically) indistinguishable.
+a) Randomization does not guarantee a perfect balance, and experiments usually do not go as planned. 
+Regression adjustment in experiments may improve precision over a simple 
+difference in means between the treated and control outcomes if the covariates are sufficiently 
+predictive of the outcome. Nevertheless, regression adjustment is not uniformly accepted due to 
+the introduced reliance on the "correctness" of the model. 
+
+Note that it is only appropriate to control for predictors that are not affected by the treatment 
+(i.e., no "intermediate outcomes" on the RHS!).
+
+</div>
+</details>
+
+# Preliminary analysis
+
+## Analytic summaries
+
+Covariate balance is typically assessed and reported using statistical measures, including 
+standardized mean differences, variance ratios, t- and Kolmogorov-Smirnov tests. 
+The balance can be reported graphically and analytically. 
+
+R packages that aid with matching usually have functions to assess balance between treated and 
+control groups. However, most of them are designed to *contrast* the balance before and after matching
+rather than help the researcher figure out whether matching is necessary in the first place. 
+
+Conveniently, there are a couple of packages, including `RItools` and `cobalt`, that allow examining
+covariate balance tables and plots prior to matching.
+
+```{r}
+xBal_res <- RItools::xBalance(treat ~ ., 
+                              data = nsw_dw %>% select(-data_id, -re78), 
+                              report="all")
+
+xBal_res
+# round(xBal_res$result,4)
+
+bal_res <- cobalt::bal.tab(nsw_dw %>% select(-data_id, -re78), 
+                           treat = nsw_dw$treat,
+                           disp.means = T, 
+                           disp.sds = T,
+                           stats = c("mean.diffs", "variance.ratios", "ks.statistics"))
+bal_res
+```
+
+While both `xBalance()` and `bal.tab()` allow to display various statistics for multiple 
+covariates simultaneously, the latter deliberately omits performing significance tests as they 
+can be misleading and their use is discouraged by leading methodologists. `bal.tab()` also 
+identifies types of each variable and applies appropriate techniques for calculating (or not)
+standardized difference and other summaries.
+
+Examine available arguments in `?xBalance` and `?bal.tab` to see what other functionality is available. 
+
+<!-- influenced by sample size, which fluctuates during adjustment, 
+ Discuss observed balance and what to expect in other columns 
+ 
+cobalt identifies types and treats binary slightly differently
+
+ The default list of comparison stats in `bal.tab()` is fairly basic, so need to add output options - 
+ Discuss what each stats mean!
+ xBalance:
+   adj.diff = difference between means
+   adj.diff.null.sd = Pooled SE of diff = (Pooled SD*sqrt(1/n1+1/n2))
+   std.diff = adj.diff / pooled SD of each variable in the treatment and control group 
+          Pooled SD = sqrt(s1^2*(n1-1)+s2^2*(n2-1)/(n1+n2))
+   z = adj.diff/{adj.diff.null.sd * sqrt(1/n1+1/n2)}
+ ##
+  Diff.Un = std.diff (continuous) or = adj.diff just difference between proportions (binary)
+  K-S should be a high value (Max =1.0) when the fit is good and a low value (Min = 0.0) when the fit is not good. 
+ 
+why am not including re78 in balance check? -->
+
+Clearly, the above output indicates that the balance in the experimental data is very good. 
+
+## Visual comparisons
+
+Ideally, we are hoping to achieve balance in the joint distributions of covariates. As we saw above, most
+packages assess numerical summaries of balance by comparing moments (first or second) between the treated 
+and control groups. However, those may not reflect a full picture and it is useful to complement such
+analysis with visual comparison of covariate distributions. Note that, Kolmogorov-Smirnov statistics 
+and the *overlapping coefficient* available in `cobalt` (`stats = "ovl.coefficients"`) also address 
+some aspects of distributional balance, beyond the first few moments.
+
+<!-- Of course, one can always develop custom graphs using basic R  graphing capabilities or ggplot or 
+interactive graphs using rshiny etc.-->
+
+```{r}
+# cobalt package has the most intuitive visualization functions
+cobalt::bal.plot(nsw_dw %>% select(-data_id, -re78), 
+                treat = nsw_dw$treat,
+                var.name = "age")
+
+cobalt::bal.plot(nsw_dw, 
+                treat = nsw_dw$treat,
+                var.name = "education",
+                type = "histogram")
+
+cobalt::bal.plot(nsw_dw, 
+                treat = nsw_dw$treat,
+                var.name = "nodegree")
+```
+
+Once again, it is fairy evident that the experiment achieved good balance between the two groups.You can 
+read about other functionalities available in `cobalt` in the following tutorial: 
+[Guide to the `cobalt` Package](https://cran.r-project.org/web/packages/cobalt/vignettes/cobalt_A0_basic_use.html). 
+
+## Merging PSID controls
+
+Next, we remove experimental controls and combine treated subjects from `nsw_dw` with the PSID sample. This 
+follows the steps taken in Lalonde (1986) to emulate a typical data collection process in an observational study.
+
+```{r}
+nsw_PSID <- nsw_dw %>%
+  filter(treat==1) %>%
+  bind_rows(PSID)
+
+summary(nsw_PSID)
+sum(nsw_PSID$treat)
+```
+
+The new combined data set contains 2,675 subjects, including 185 treated from NSW data. 
+
+## Exercise 1
+
+**Balance in the combined data set**
+
+1. Assess the balance in the combined data set using any routines outlined above, 
+both analytic and graphical. Discuss your observations.
+```{r}
+## 
+```
+
+2. Estimate the treatment effect using OLS, controlling for available background 
+covariates.
+```{r}
+##
+```
+
+3. Discuss the following questions:
+
+a) How does the estimated effect compare to the one from the randomized experiment?
+a) Why do you think there is such discrepancy, even though we "controlled" for all pre-treatment 
+variables?
+
+<details>
+  <summary><span style="color:red"><b>Click for Exercise 1 Solution</b></span></summary>
+  <div class="alert alert-danger">
+
+1. Assess the balance in the combined data set using any routines outlined above, 
+both analytic and graphical. Discuss your observations.
+```{r}
+## Let's use bal.tab
+bal.tab(nsw_PSID %>% select(-data_id, -re78), 
+        treat = nsw_PSID$treat,
+        disp.means = T, 
+        disp.sds = T,
+        stats = c("mean.diffs", "variance.ratios", "ks.statistics"))
+
+nsw_PSID_posRE74 <- nsw_PSID %>% filter(re74>0)
+bal.plot(nsw_PSID_posRE74, 
+         treat = nsw_PSID_posRE74$treat,
+         var.name = "re74")
+
+bal.plot(nsw_PSID, 
+         treat = nsw_PSID$treat,
+         var.name = "married")
+```
+
+The treated subjects tend to be younger, have fewer years of education, are less likely to be married, 
+and earn a lot less in 1974 and 1975.
+
+<!-- Subjects in the comparison group are,  on average, older, more educated, with a 
+very different racial profile, and much higher prior earnings -->
+
+2. Estimate the treatment effect using OLS, controlling for available background 
+covariates. 
+```{r}
+# Treatment effect using regression adjustment
+raw_mod <- lm(re78 ~ treat + age + education + black + hispanic + nodegree + married + re74 + re75, 
+                data = nsw_PSID)
+summary(raw_mod)
+confint(raw_mod)
+```
+
+3. Discuss the following questions:
+
+a) How does the estimated effect compare to the one from the randomized experiment?
+a) Why do you think there is such discrepancy, even though we "controlled" for all 
+pre-treatment variables?
+
+Answer:
+
+a) The estimated effect (\$752) is about half of the effect obtained from the experiment (\$1,676).
+It is also not significant.
+a) Drawing causal inference from OLS estimates is only appropriate when we can assume ignorability 
+(i.e., we believe that treatment assignments only depend on information included in the model),  and
+when the chosen outcome model is correct. Lack of overlap and balance forces stronger reliance 
+on our modeling than if covariate distributions were the same across treatment groups. Considerable
+nonoverlap also make the assumption about a constant treatment effect less plausible
+and results in heavy extrapolations. 
+
+<!-- Verbal: Regression is only good if Ignorability holds and the model is correct. 
+Clearly, at least one assumption doesn't hold here. -->
+</div>
+</details>
+
+# Tools for Matching in R
+
+There are a few R packages that perform data preprocessing and causal effect estimation:
+
+* `MatchIt` Nonparametric Preprocessing for Parametric Causal Inference (Ho, Imai, King, & Stuart, 2011)
+* `twang` Toolkit for Weighting and Analysis of Nonequivalent Groups (Ridgeway, McCaffrey, Morral, Burgette, & Griffin, 2020)
+* `Matching` Multivariate and Propensity Score Matching with Balance Optimization (Sekhon, 2011)
+* `cem` Coarsened Exact Matching (Iacus, King, & Porro, 2018)
+* `optmatch` Functions for Optimal Matching (Hansen & Klopfer, 2006)
+* `CBPS` Covariate Balancing Propensity Score (Fong, Ratkovic, Hazlett, Yang, & Imai, 2019), 
+* `ebal` Entropy reweighting to create balanced samples (Hainmueller, 2014)
+* `sbw` Stable Balancing Weights for Causal Inference and Estimation with Incomplete Outcome Data (Zubizarreta & Li, 2019)
+* `designmatch` Matched Samples that are Balanced and Representative by Design (Zubizarreta, Kilcioglu, & Vielma, 2018)
+* `WeightIt` Weighting for Covariate Balance in Observational Studies (Greifer, 2020)
+* `MatchThem` Matching and Weighting Multiply Imputed Datasets (Pishgar & Greifer, 2020)
+* `PanelMatch` Matching Methods for Causal Inference with Time-Series Cross-Sectional Data (Imai, Kim, and Wang, 2018)
+* `multilevelPSA` Multilevel Propensity Score Analysis (Bryer & Pruzek, 2011)
+* `party` A Laboratory for Recursive Partytioning (Hothorn, Hornik, & Zeileis, 2006)
+* `rpart` Recursive Partitioning (Therneau, Atkinson, & Ripley, 2012)
+* `rbounds` An Overview of rebounds: An R Package for Rosenbaum bounds sensitivity analysis with matched data (Keele, 2010) 
+* `TriMatch`Propensity Score Matching for Non-Binary Treatments (Bryer, 2013)
+
+The packages vary in ranges of available methods and functionalities but, together, provide a rich set of 
+preprocessing tools. For a thorough review of some of them see Keller & Tipton (2016). Next we will explore
+functions from packages `MatchIt` and `cem`. 
+
+## PS Matching with `MatchIt`
+
+The default method in the `MatchIt` package is the Nearest Neighbor Matching, which (sequentially) selects 
+the best control for each treated subject using distance between their estimated *propensity scores*. 
+The end result is two groups with (hopefully) similar distributions of covariates.
+
+```{r}
+# 
+m_NNM_out <- MatchIt::matchit(treat ~ age + education + black + hispanic + 
+                                married + nodegree + re74 + re75,
+                              data = nsw_PSID) # Try discard = "both"
+summary(m_NNM_out) # Can add standardize = TRUE
+
+## `cobalt` package offers additional summaries of distributional differences
+## Note that it can process objects returned by matchit()!
+cobalt::bal.tab(m_NNM_out,
+                disp.means = T,
+                disp.sds = T,
+                stats = c("mean.diffs", "variance.ratios", "ks.statistics"))
+```
+<!-- eQQ are median, mean, and maximum value of differences in empirical 
+quantile functions for each covariate will be given 
+Full matching: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5784842/
+distance = "mahalanobis"
+Examing "methods" options and "distance"
+-->
+
+This should run fairly quickly! The next step is to investigate the results of the matching procedure. 
+Did we improve balance? Are the selected comparison units similar to treated units across age, race, 
+education, marital status, and prior earnings? The quickest way to check this is to plot a summary 
+of the results, like so:
+
+```{r}
+s.out <- summary(m_NNM_out, standardize = TRUE)
+
+# The default plotting function in `MatchIt`
+plot(s.out, interactive = F)
+
+# Compare the distribution of propensity scores before and after matching
+plot(m_NNM_out, type = "hist")
+```
+
+The default plotting function in `MatchIt` is somewhat clunky. Again, we can use functions from 
+`cobalt` to make pretty plots using objects generated by `matchit()`. 
+
+The *Love plot* is a summary  plot of covariate balance before and after conditioning popularized by 
+Dr. Thomas Love. In a visually appealing and clear way, it can help demonstrate that balance 
+has been met within a threshold, and that balance has improved after conditioning.
+
+```{r}
+cobalt::love.plot(m_NNM_out, 
+                  stats = c("mean.diffs", "ks.statistics"), 
+                  threshold = c(m = .5, ks = .25), 
+                  binary = "std", #display standardized mean difference for all of the covariates
+                  #abs = TRUE,
+                  var.order = "unadjusted", 
+                  grid = T, 
+                  sample.names = c("Unmatched", "Matched"),
+                  position = "top", 
+                  colors = c("red", "blue"))
+
+# Propensity Scores before and after weighting (which = "both")
+cobalt::bal.plot(m_NNM_out, 
+                 var.name = "distance", 
+                 which = "both",
+                 type = "histogram", 
+                 mirror = TRUE)
+
+```
+
+Even though we haven't achieved a perfect balance, we will hope that the remaining discrepancy is 
+adequately controlled by an OLS regression. For that, we first extract the matched data 
+set using `MatchIt::match.data`.
+
+
+```{r}
+m.data.NNM <- MatchIt::match.data(m_NNM_out)
+summary(m.data.NNM)
+m.data.NNM$treat %>% table
+```
+Now we are ready to rerun the OLS and estimate the causal treatment effect:
+
+```{r}
+# Treatment effect using regression adjustment
+NNM_mod <- lm(re78 ~ treat + age + education + black + hispanic + 
+                nodegree + married + re74 + re75, 
+              data = m.data.NNM)
+summary(NNM_mod)
+confint(NNM_mod)
+```
+
+Note that the estimated treatment effect (\$1,084) is closer to the truth (\$1,676) and its 
+95% CI contains the true value.
+
+`MatchIt` offers other matching techniques, including exact matching, full matching, and k:1 
+matching with replacement, some of which are enabled by loading other add-on packages 
+in the background. Read more about other functionalities here:
+[Ho, Imai, King, Stuart 2011, "MatchIt: Nonparametric Preprocessing for Parametric Causal Inference." Journal of Statistical Software](https://gking.harvard.edu/files/gking/files/v42i08.pdf).
+
+Next, we will practice matching using another package called `cem`. 
+
+## Matching with `cem`
+
+Package `cem` performs an automatic coarsened exact matching (CEM) using the following steps: 
+
+1. *Temporarily* coarsen each covariate in a user-defined (or automated) way. 
+
+2. Sort all units into strata, each of which has the same values of the coarsened X.
+
+3. Discard all units in those strata that do not include at least one treated and 
+one control unit.
+
+`cem` also offers its own functions for checking balance between groups:
+
+```{r}
+## While not as consequential for propensity-score matching, it is important to preprocess the 
+## data set before running CEM and specify all non-numeric covariates to ensure that "binning"
+## is performed correctly
+nsw_PSID_cem <- 
+  nsw_PSID %>%
+    mutate_at(vars(black, hispanic, married, nodegree), ~as.factor(.)) %>% 
+    as.data.frame
+
+## It is also advised to prespecify relevant cutpoints for continuous covariates 
+edu_cut <- c(0, 6.5, 8.5, 12.5, 17)
+re_cut <- c(0, 1, 2500, 5000, 7500, 10000, 15000, 20000, 50000, 100000, 200000)
+
+cem::imbalance(group = nsw_PSID_cem$treat, 
+               data  = nsw_PSID_cem,
+               drop  = c("treat", "re78", "data_id"))
+```
+
+L1 statistic from the output above measures differences between the uni- (and multi-) dimensional histograms 
+of all covariates in the two groups. 
+Perfect (up to discretization) global balance result in L1 = 0. Whereas, L1 = 1 indicates complete separation of 
+the multidimensional histograms. Any value in the interval (0, 1) indicates the amount of difference between 
+frequencies of units in strata for each coarsened covariate of the two groups.
+
+In our case, the multivariate imbalanced measure (L1) is close to 1, suggesting an almost complete separation. 
+The differences in the empirical quantiles of the two distributions (same as eQQ statistics reported by `MatchIt`) 
+also indicate a large amount of imbalance for many covariates.
+
+<!-- Again, every package offers slightly different summary of imbalance it takes a bit of time reading thorugh (sparse) documentation to figure it out
+statistic: diff for continuous and Chi2 for factors
+type: diff/chi2
+L1
+min, X%, max: differences in the empirical quantiles of the two distribution, similar to eQQ statistics returned by MatchIt
+-->
+
+Let's now perform CEM on our observational data:
+
+```{r}
+m_cem_out <-
+  cem::cem(treatment = "treat",
+           data = nsw_PSID_cem, 
+           verbose = TRUE, 
+           keep.all = TRUE, # coarsened dataset is returned
+           drop = c("re78", "data_id"),
+           cutpoints = list(education = edu_cut,
+                            re75 = re_cut))  
+m_cem_out
+
+# m_cem_out$breaks
+```
+
+Note that, unlike NNM in `MatchIt`, CEM method dropped a few (`r m_cem_out$tab["Unmatched","G1"]`) treated units 
+(and a vast majority of control units) on strata that did not have any comparables from the other groups. 
+Let's examine the resulting balance:
+
+```{r}
+cobalt::bal.tab(m_cem_out,
+                data =  nsw_PSID_cem, # Data must be specified if we work with `cem` objects
+                disp.means = T,
+                disp.sds = T,
+                stats = c("mean.diffs", "variance.ratios", "ks.statistics"))
+                
+cobalt::love.plot(m_cem_out, 
+                  stats = c("mean.diffs", "variance.ratios", "ks.statistics"), 
+                  data = nsw_PSID_cem,
+                 # threshold = c(m = .5, ks = .25), 
+                  binary = "std", 
+                  abs = TRUE,
+                  var.order = "unadjusted", 
+                  grid = T,
+                  sample.names = c("Unmatched", "Matched"),
+                  colors = c("red", "blue"))
+```
+<!-- Matched ESS - effective sample size -->
+
+We've achieved a much better balance. However, lost many degrees of freedom by considerably 
+pruning the treated group. 
+
+## Exercise 2
+
+**Progressive coarsening with `cem`**
+
+Although the maximum imbalance is fixed by the user’s coarsening choices, the number
+of observations matched is determined as a consequence of the matching procedure. If you
+are dissatisfied with the number of observations available after matching, and you feel that
+it is substantively appropriate to coarsen further, then just increase the coarsening (by using
+fewer cutpoints). The result will be additional matches, though the maximum possible imbalance 
+between the treated and control groups would also go up.
+
+This is easy with CEM because CEM is a monotonic imbalance bounding (MIB) method, which means
+that increasing the imbalance on one variable (by widening the coarsened bin sizes) will not
+change the maximum imbalance on any other variable. MIB thus enables you to tinker with
+the solution one variable at a time to quickly produce a satisfactory result, if one is feasible.
+
+`cem` offers an automated way to relax the initial coarsening with a function `relax.cem()`. This
+function starts with the output of cem and relaxes variables one (`depth = 1`), two (`depth = 2`),
+or three (`depth = 3`) at a time, while optionally keeping unchanged a chosen subset of 
+the variables which we know well or have important effects on the outcome (`fixed`). The function 
+also allows one to specify the minimal number of breaks of each variable (the default
+limit being 1). 
+
+Review the documentation on `relax.cem()` and perform coarsened matching with `depth = 1`. 
+Examine the resulting tables and a summary graph. Which variables are the hardest to match on?
+
+```{r}
+## 
+```
+
+<details>
+  <summary><span style="color:red"><b>Click for Exercise 2 Solution</b></span></summary>
+  <div class="alert alert-danger">
+
+```{r}
+## Let's use bal.tab
+prog_cem  <- relax.cem(m_cem_out, nsw_PSID_cem, depth = 1)
+prog_cem
+```
+
+From the output we can see where the difficulties in matching this data are found and what choices would produce 
+which outcomes in terms of the numbers of observations matched. Here, as expected, `re74`, `married`,
+and `age` variables were some of the hardest to match on. Note that, for categorical variables, 
+the algorithm considers the numerical values associated to each level of the variable. 
+
+</div>
+</details>
+
+## Estimating ATT with `cem` 
+
+Because `cem` results in a stratified data set, we have to use a special function `cem::att()` 
+(which stands for "Average Treatment effect on the Treated") to estimate the treatment effect. 
+It takes CEM output and applies a `model` of user's choice, using a user-specified `formula` like follows:
+
+```{r}
+##
+est <- att(m_cem_out, 
+           re78 ~ treat + age + education + black + 
+             hispanic + nodegree + married + re74 + re75, 
+           data = nsw_PSID_cem)
+summary(est)
+```
+
+The estimate of the treatment effect ($1,711), though statistically insignificant, is very 
+close to the one obtained from the randomized experiment.
+
+For more on `cem` package check out [Iacus, King, Porro, 2009, "CEM: Software for Coarsened Exact Matching." Journal of Statistical Software](https://gking.harvard.edu/files/gking/files/jss-paper.pdf).
+
+## Conclusion
+
+We've only scratches the surface on available R packages, methods that they offer, and options 
+available for these methods. We found that R documentation for many of them is sparse. However, it helps to review
+the accompanying publications as well as search around for examples developed by other users. 
+
+## Wrap-up
+
+### Feedback
+
+These workshops are a work in progress, please provide any feedback to: research@hbs.edu.
+
+### Resources
+
+* IQSS 
+    + Workshops: <https://dss.iq.harvard.edu/workshop-materials>
+    + Data Science Services: <https://dss.iq.harvard.edu/>
+    + Research Computing Environment: <https://iqss.github.io/dss-rce/>
+
+* HBS
+    + Research Computing Services workshops: <https://training.rcs.hbs.org/workshops>
+    + Other HBS RCS resources: <https://training.rcs.hbs.org/workshop-materials>
+    + RCS consulting email: <mailto:research@hbs.edu>
