@@ -2435,10 +2435,9 @@ cem::imbalance(group = nsw_PSID_cem$treat,
 ## re75      -131511.0</code></pre>
 <p>L1 statistic from the output above measures differences between the uni- (and multi-) dimensional histograms of all covariates in the two groups. Perfect (up to discretization) global balance result in L1 = 0. Whereas, L1 = 1 indicates complete separation of the multidimensional histograms. Any value in the interval (0, 1) indicates the amount of difference between frequencies of units in strata for each coarsened covariate of the two groups.</p>
 <p>In our case, the multivariate imbalanced measure (L1) is close to 1, suggesting an almost complete separation. The differences in the empirical quantiles of the two distributions (same as eQQ statistics reported by <code>MatchIt</code>) also indicate a large amount of imbalance for many covariates.</p>
-<!-- Again, every package offers slightly different summary of imbalance it takes a bit of time reading thorugh (sparse) documentation to figure it out
+<!-- Again, every package offers slightly different summary of imbalance it takes a bit of time reading through (sparse) documentation to figure it out
 statistic: diff for continuous and Chi2 for factors
-type: diff/chi2
-L1
+type: diff or chi2
 min, X%, max: differences in the empirical quantiles of the two distribution, similar to eQQ statistics returned by MatchIt
 -->
 <p>Let’s now perform CEM on our observational data:</p>
