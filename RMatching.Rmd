@@ -17,7 +17,7 @@ options(max.print = 100)
 
 ## Software and Prerequisites
 
-This is an advanced R course:
+This is an intermediate R course:
 
 * Assumes working knowledge of R
 * Relatively fast-paced
@@ -34,10 +34,10 @@ We will learn about the tools available in R to perform matching for the purpose
 inference. We will also practice going through a recommended workflow for executing some of the 
 matching algorithms. In particular, our goals are to learn about:
 
-* Estimating a treatment effect in experimental data
+* Estimating treatment effect in experimental data
 * Adjusting for covariates in observational studies
 * Balance checking between exposure group and control group
-* Identifying the region of common support
+* Identifying regions of common support
 * R tools for matching
 * Matching workflow
 
@@ -61,6 +61,9 @@ rendering RMarkdown documents:
 ```{r, message=FALSE}
 # install.packages("tidyverse")
 library(tidyverse)
+
+# install.packages("haven")
+library(haven)
 
 # install.packages("rmarkdown")
 library(rmarkdown)
@@ -93,25 +96,24 @@ performance-oriented environment would equip hard-to-employ people to get and ho
 Here are some facts about the study and subsequent use of the data it generated:
 
 * Multisite randomized experiment; found that training raised yearly earnings by about $800 for 
-male participants
+male participants.
 * Lalonde (1986) tried to use (then) existing non-experimental methods to recover this effect:
   * Used randomized treatment group, but replaced the control group with comparison groups from 
   large publicly available datasets, including the Current Population Survey (CPS) and the 
-  Population Survey of Income Dynamics (PSID)
-  * Caveat - used almost everyone from the selected surveys
+  Population Survey of Income Dynamics (PSID).
+  * Caveat - used almost everyone from the selected surveys!
   * Found that none of the tried methods did very well; results all over the place 
   (-\$16,000 to \$7,000)
 * Dehejia and Wahba (DW, 1999) used the matching approach to select people from the CPS 
-**who looked the most similar to the treated individuals** and were able to recover the effect from the experiment!
+**who looked the most similar to the treated individuals** and were able to recover the effect from the experiment.
 
 Let's load the data and examine it.
 
 ```{r}
 ## Data is hosted on one of the authors' web-site
-
+## Note that this data set is a subset of the original data, 
+## excluding subject with missing information on prior earnings
 nsw_dw <- haven::read_dta("http://www.nber.org/~rdehejia/data/nsw_dw.dta") 
-## Note that this data set is a subset of the original data, excluding subject with missing information
-## on prior earnings
 
 PSID <- haven::read_dta("http://www.nber.org/~rdehejia/data/psid_controls.dta")
 
@@ -161,7 +163,7 @@ steps when applying matching techniques:
 
 1. Pre-analysis of non-matched data
 2. Matching
-3. Checking balance post-matching; repeat 2-3 as needed
+3. Checking balance post-matching; repeat steps 2-3 as needed
 
 Throughout this workshop we will repeat some of the steps and try out several matching methods.
 
@@ -169,7 +171,7 @@ Throughout this workshop we will repeat some of the steps and try out several ma
 
 **Treatment effect from experimental data**
 
-Since the original data set came from a randomized experiment, a *gold standard*"* of 
+Since the original data set came from a randomized experiment, a *gold standard* of 
 causal inference, we can estimate the true treatment effect. 
 
 1. Use OLS regression to estimate the difference between average outcomes. 
@@ -220,12 +222,12 @@ a) The estimated treatment effects are very similar (\$1,794.3 vs. \$1,676). The
 considerable overlap between their 95% intervals: (551, 3038) vs. (421, 2932).
 The estimates are statistically (and practically) indistinguishable.
 a) Randomization does not guarantee a perfect balance, and experiments usually do not go as planned. 
-Regression adjustment in experiments may improve precision over a simple 
+Regression adjustment in experiments *may* improve precision over a simple 
 difference in means between the treated and control outcomes if the covariates are sufficiently 
 predictive of the outcome. Nevertheless, regression adjustment is not uniformly accepted due to 
 the introduced reliance on the "correctness" of the model. 
 
-Note that it is only appropriate to control for predictors that are not affected by the treatment 
+Note that, regardless of the trade-offs discussed above, it is only appropriate to control for predictors that are not affected by the treatment 
 (i.e., no "intermediate outcomes" on the RHS!).
 
 </div>
@@ -264,9 +266,8 @@ bal_res
 
 While both `xBalance()` and `bal.tab()` allow to display various statistics for multiple 
 covariates simultaneously, the latter deliberately omits performing significance tests as they 
-can be misleading and their use is discouraged by leading methodologists. `bal.tab()` also 
-identifies types of each variable and applies appropriate techniques for calculating (or not)
-standardized difference and other summaries.
+can be misleading and their use is discouraged by leading methodologists (e.g., Ali et al. (2015)). `bal.tab()` also  identifies types of each variable and applies appropriate techniques 
+for calculating (or not) standardized difference and other summaries.
 
 Examine available arguments in `?xBalance` and `?bal.tab` to see what other functionality is available. 
 
@@ -285,7 +286,7 @@ cobalt identifies types and treats binary slightly differently
    z = adj.diff/{adj.diff.null.sd * sqrt(1/n1+1/n2)}
  ##
   Diff.Un = std.diff (continuous) or = adj.diff just difference between proportions (binary)
-  K-S should be a high value (Max =1.0) when the fit is good and a low value (Min = 0.0) when the fit is not good. 
+  KS two-sample test checks whether the two data samples come from the same distribution. Should be a low value (Min = 0.0) when the fit is good and a high value (Max = 1.0) when the fit is not good. For binary variables, the KS statistic is just the difference in proportions. 
  
 why am not including re78 in balance check? -->
 
@@ -337,7 +338,7 @@ summary(nsw_PSID)
 sum(nsw_PSID$treat)
 ```
 
-The new combined data set contains 2,675 subjects, including 185 treated from NSW data. 
+The new combined data set contains 2,675 subjects, including 185 treated from the NSW data. 
 
 ## Exercise 1
 
@@ -395,7 +396,8 @@ very different racial profile, and much higher prior earnings -->
 covariates. 
 ```{r}
 # Treatment effect using regression adjustment
-raw_mod <- lm(re78 ~ treat + age + education + black + hispanic + nodegree + married + re74 + re75, 
+raw_mod <- lm(re78 ~ treat + age + education + black + 
+                hispanic + nodegree + married + re74 + re75, 
                 data = nsw_PSID)
 summary(raw_mod)
 confint(raw_mod)
@@ -416,7 +418,7 @@ a) Drawing causal inference from OLS estimates is only appropriate when we can a
 when the chosen outcome model is correct. Lack of overlap and balance forces stronger reliance 
 on our modeling than if covariate distributions were the same across treatment groups. Considerable
 nonoverlap also make the assumption about a constant treatment effect less plausible
-and results in heavy extrapolations. 
+as well as results in heavy extrapolations. 
 
 <!-- Verbal: Regression is only good if Ignorability holds and the model is correct. 
 Clearly, at least one assumption doesn't hold here. -->
@@ -456,7 +458,6 @@ the best control for each treated subject using distance between their estimated
 The end result is two groups with (hopefully) similar distributions of covariates.
 
 ```{r}
-# 
 m_NNM_out <- MatchIt::matchit(treat ~ age + education + black + hispanic + 
                                 married + nodegree + re74 + re75,
                               data = nsw_PSID) # Try discard = "both"
@@ -473,7 +474,7 @@ cobalt::bal.tab(m_NNM_out,
 quantile functions for each covariate will be given 
 Full matching: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5784842/
 distance = "mahalanobis"
-Examing "methods" options and "distance"
+Examine "methods" options and "distance"
 -->
 
 This should run fairly quickly! The next step is to investigate the results of the matching procedure. 
@@ -540,19 +541,19 @@ summary(NNM_mod)
 confint(NNM_mod)
 ```
 
-Note that the estimated treatment effect (\$1,084) is closer to the truth (\$1,676) and its 
-95% CI contains the true value.
+Note that the estimated treatment effect (\$1,084) is closer to the one obtained from the experiment (\$1,676) and its 
+95% CI contains this value.
 
 `MatchIt` offers other matching techniques, including exact matching, full matching, and k:1 
 matching with replacement, some of which are enabled by loading other add-on packages 
-in the background. Read more about other functionalities here:
+in the background. Read more about all the available options here:
 [Ho, Imai, King, Stuart 2011, "MatchIt: Nonparametric Preprocessing for Parametric Causal Inference." Journal of Statistical Software](https://gking.harvard.edu/files/gking/files/v42i08.pdf).
 
 Next, we will practice matching using another package called `cem`. 
 
 ## Matching with `cem`
 
-Package `cem` performs an automatic coarsened exact matching (CEM) using the following steps: 
+Package `cem` performs an automatic Coarsened Exact Matching (CEM) using the following steps: 
 
 1. *Temporarily* coarsen each covariate in a user-defined (or automated) way. 
 
@@ -572,10 +573,6 @@ nsw_PSID_cem <-
     mutate_at(vars(black, hispanic, married, nodegree), ~as.factor(.)) %>% 
     as.data.frame
 
-## It is also advised to prespecify relevant cutpoints for continuous covariates 
-edu_cut <- c(0, 6.5, 8.5, 12.5, 17)
-re_cut <- c(0, 1, 2500, 5000, 7500, 10000, 15000, 20000, 50000, 100000, 200000)
-
 cem::imbalance(group = nsw_PSID_cem$treat, 
                data  = nsw_PSID_cem,
                drop  = c("treat", "re78", "data_id"))
@@ -591,16 +588,19 @@ In our case, the multivariate imbalanced measure (L1) is close to 1, suggesting 
 The differences in the empirical quantiles of the two distributions (same as eQQ statistics reported by `MatchIt`) 
 also indicate a large amount of imbalance for many covariates.
 
-<!-- Again, every package offers slightly different summary of imbalance it takes a bit of time reading thorugh (sparse) documentation to figure it out
+<!-- Again, every package offers slightly different summary of imbalance it takes a bit of time reading through (sparse) documentation to figure it out
 statistic: diff for continuous and Chi2 for factors
-type: diff/chi2
-L1
+type: diff or chi2
 min, X%, max: differences in the empirical quantiles of the two distribution, similar to eQQ statistics returned by MatchIt
 -->
 
 Let's now perform CEM on our observational data:
 
 ```{r}
+## It is advised to prespecify relevant cutpoints for continuous covariates 
+edu_cut <- c(0, 8.5, 12.5, 17)
+re_cut <- c(0, 2500, 5000, 7500, 10000, 15000, 20000, 50000, 100000, 200000)
+
 m_cem_out <-
   cem::cem(treatment = "treat",
            data = nsw_PSID_cem, 
@@ -614,8 +614,9 @@ m_cem_out
 # m_cem_out$breaks
 ```
 
-Note that, unlike NNM in `MatchIt`, CEM method dropped a few (`r m_cem_out$tab["Unmatched","G1"]`) treated units 
-(and a vast majority of control units) on strata that did not have any comparables from the other groups. 
+Note that, unlike NNM example in `MatchIt`, CEM method dropped a few (`r m_cem_out$tab["Unmatched","G1"]`) treated units 
+(and a vast majority of control units) on strata that did not have any comparables from the other groups. (Note that we could've specified `discard = "both"` in `matchit()` to remove units that fall outside of some measure of support before matching). 
+
 Let's examine the resulting balance:
 
 ```{r}
@@ -641,7 +642,7 @@ cobalt::love.plot(m_cem_out,
 We've achieved a much better balance. However, lost many degrees of freedom by considerably 
 pruning the treated group. 
 
-## Exercise 2
+## Exercise 2*
 
 **Progressive coarsening with `cem`**
 
@@ -658,11 +659,10 @@ change the maximum imbalance on any other variable. MIB thus enables you to tink
 the solution one variable at a time to quickly produce a satisfactory result, if one is feasible.
 
 `cem` offers an automated way to relax the initial coarsening with a function `relax.cem()`. This
-function starts with the output of cem and relaxes variables one (`depth = 1`), two (`depth = 2`),
+function starts with the output of `cem()` and relaxes variables one (`depth = 1`), two (`depth = 2`),
 or three (`depth = 3`) at a time, while optionally keeping unchanged a chosen subset of 
 the variables which we know well or have important effects on the outcome (`fixed`). The function 
-also allows one to specify the minimal number of breaks of each variable (the default
-limit being 1). 
+also allows to specify the minimal number of breaks for each variable (`minimal`, set to 1 by default). 
 
 Review the documentation on `relax.cem()` and perform coarsened matching with `depth = 1`. 
 Examine the resulting tables and a summary graph. Which variables are the hardest to match on?
@@ -672,7 +672,7 @@ Examine the resulting tables and a summary graph. Which variables are the hardes
 ```
 
 <details>
-  <summary><span style="color:red"><b>Click for Exercise 2 Solution</b></span></summary>
+  <summary><span style="color:red"><b>Click for Exercise 2* Solution</b></span></summary>
   <div class="alert alert-danger">
 
 ```{r}
@@ -691,21 +691,21 @@ the algorithm considers the numerical values associated to each level of the var
 
 ## Estimating ATT with `cem` 
 
-Because `cem` results in a stratified data set, we have to use a special function `cem::att()` 
+Because `cem` results in a *stratified data set*, we have to use a special function `cem::att()` 
 (which stands for "Average Treatment effect on the Treated") to estimate the treatment effect. 
-It takes CEM output and applies a `model` of user's choice, using a user-specified `formula` like follows:
+It takes CEM output and applies a `model` of user's choice, using a specified `formula`:
 
 ```{r}
-##
+## Note that we need to exclude hispanic from the model
 est <- att(m_cem_out, 
-           re78 ~ treat + age + education + black + 
-             hispanic + nodegree + married + re74 + re75, 
+           re78 ~ treat + age + education + black + #hispanic
+             nodegree + married + re74 + re75, 
            data = nsw_PSID_cem)
 summary(est)
 ```
 
-The estimate of the treatment effect ($1,711), though statistically insignificant, is very 
-close to the one obtained from the randomized experiment.
+The estimate of the treatment effect (\$`r round(est$att.model["Estimate","treat"])`) is very close to the one 
+obtained from the randomized experiment.
 
 For more on `cem` package check out [Iacus, King, Porro, 2009, "CEM: Software for Coarsened Exact Matching." Journal of Statistical Software](https://gking.harvard.edu/files/gking/files/jss-paper.pdf).
 
@@ -719,7 +719,7 @@ the accompanying publications as well as search around for examples developed by
 
 ### Feedback
 
-These workshops are a work in progress, please provide any feedback to: research@hbs.edu.
+This workshop is a work in progress. Please provide any feedback to: research@hbs.edu.
 
 ### Resources
 
