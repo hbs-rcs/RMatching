@@ -1,7 +1,5 @@
 # Causal Inference via Matching in R
 
-April, 2020
-
 Author: Victoria L. Prince ([vliublinska](https://github.com/vliublinska))
 
 ## Overview

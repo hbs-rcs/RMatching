@@ -1,7 +1,6 @@
 ---
 title: "Causal Inference via Matching in R"
 author: Victoria L. Prince, Research Computing Services, HBS
-date: April 24, 2020
 output:
   html_document:
     toc: true
@@ -12,6 +11,8 @@ output:
 
 ```{r, echo=FALSE, results=FALSE, eval=TRUE}
 options(max.print = 100)
+library(knitr)
+library(kableExtra)
 ```
 
 # Setup
@@ -52,12 +53,11 @@ Start RStudio and create a new project:
     RStudio will be in your applications folder.
 * In Rstudio go to `File -> New Project`.
 * Choose `Existing Directory` and browse to the workshop materials directory on your desktop.
-* Choose `File -> Open File` and select the file with the word "BLANK" in the name.
+* Choose `File -> New File` and select an `R Script`.
 
 ## Packages
 
-Let's install (if needed) and load R packages that will aid with data wrangling and 
-rendering RMarkdown documents: 
+Let's install (if needed) and load R packages that will aid with data loading and wrangling: 
 
 ```{r, message=FALSE}
 # install.packages("tidyverse")
@@ -65,9 +65,6 @@ library(tidyverse)
 
 # install.packages("haven")
 library(haven)
-
-# install.packages("rmarkdown")
-library(rmarkdown)
 ```
 
 Next, lets add some packages that will help with matching:
@@ -90,7 +87,7 @@ library(cobalt) # for displaying balance statistics
 
 We will use a classic example data set from a National Supported Work (NSW) Study conducted in 1970's 
 and designed to test whether and to what extent a temporary employment in a supportive but 
-performance-oriented environment would equip hard-to-employ people to get and hold normal jobs. 
+performance-oriented environment would help hard-to-employ people to get and hold normal jobs. 
 
 ## Background
 
@@ -307,23 +304,23 @@ interactive graphs using rshiny etc.-->
 
 ```{r}
 # cobalt package has the most intuitive visualization functions
-cobalt::bal.plot(nsw_dw %>% select(-data_id, -re78), 
+cobalt::bal.plot(nsw_dw %>% select(-data_id), 
                 treat = nsw_dw$treat,
                 var.name = "age")
 
-cobalt::bal.plot(nsw_dw, 
+cobalt::bal.plot(nsw_dw %>% select(-data_id), 
                 treat = nsw_dw$treat,
                 var.name = "education",
                 type = "histogram")
 
-cobalt::bal.plot(nsw_dw, 
+cobalt::bal.plot(nsw_dw %>% select(-data_id), 
                 treat = nsw_dw$treat,
                 var.name = "nodegree")
 ```
 
 Once again, it is fairy evident that the experiment achieved good balance between the two groups.You can 
 read about other functionalities available in `cobalt` in the following tutorial: 
-[Guide to the `cobalt` Package](https://cran.r-project.org/web/packages/cobalt/vignettes/cobalt_A0_basic_use.html). 
+[Guide to the `cobalt` Package](https://cran.r-project.org/web/packages/cobalt/vignettes/cobalt.html). 
 
 ## Merging PSID controls
 
@@ -418,7 +415,7 @@ a) Drawing causal inference from OLS estimates is only appropriate when we can a
 (i.e., we believe that treatment assignments only depend on information included in the model),  and
 when the chosen outcome model is correct. Lack of overlap and balance forces stronger reliance 
 on our modeling than if covariate distributions were the same across treatment groups. Considerable
-nonoverlap also make the assumption about a constant treatment effect less plausible
+nonoverlap also makes the assumption about a constant treatment effect less plausible
 as well as results in heavy extrapolations. 
 
 <!-- Verbal: Regression is only good if Ignorability holds and the model is correct. 
@@ -484,13 +481,13 @@ education, marital status, and prior earnings? The quickest way to check this is
 of the results, like so:
 
 ```{r}
-s.out <- summary(m_NNM_out, standardize = TRUE)
-
 # The default plotting function in `MatchIt`
-plot(s.out, interactive = F)
-
 # Compare the distribution of propensity scores before and after matching
 plot(m_NNM_out, type = "hist")
+
+# Compare standardized mean differences before/after
+s.out <- summary(m_NNM_out, standardize = TRUE)
+plot(s.out, interactive = F)
 ```
 
 The default plotting function in `MatchIt` is somewhat clunky. Again, we can use functions from 
@@ -506,16 +503,16 @@ cobalt::love.plot(m_NNM_out,
                   threshold = c(m = .5, ks = .25), 
                   binary = "std", #display standardized mean difference for all of the covariates
                   #abs = TRUE,
-                  var.order = "unadjusted", 
+                  var.order = "unadjusted", #how to order the variables in the plot
                   grid = T, 
-                  sample.names = c("Unmatched", "Matched"),
+                  sample.names = c("Matched", "Unmatched"), #new names to be given to the samples
                   position = "top", 
-                  colors = c("red", "blue"))
+                  colors = c("blue", "red"))
 
 # Propensity Scores before and after weighting (which = "both")
 cobalt::bal.plot(m_NNM_out, 
                  var.name = "distance", 
-                 which = "both",
+                 which = "both", #what distributional balance to display
                  type = "histogram", 
                  mirror = TRUE)
 
@@ -527,14 +524,15 @@ set using `MatchIt::match.data`.
 
 
 ```{r}
+# Extracting the matched data set
 m.data.NNM <- MatchIt::match.data(m_NNM_out)
 summary(m.data.NNM)
 m.data.NNM$treat %>% table
 ```
-Now we are ready to rerun the OLS and estimate the causal treatment effect:
+Now we are ready to rerun the OLS and estimate the causal treatment effect *on all subjects*:
 
 ```{r}
-# Treatment effect using regression adjustment
+# Re-estimating the treatment effect using regression adjustment
 NNM_mod <- lm(re78 ~ treat + age + education + black + hispanic + 
                 nodegree + married + re74 + re75, 
               data = m.data.NNM)
@@ -566,24 +564,26 @@ one control unit.
 `cem` also offers its own functions for checking balance between groups:
 
 ```{r}
-## While not as consequential for propensity-score matching, it is important to preprocess the 
-## data set before running CEM and specify all non-numeric covariates to ensure that "binning"
-## is performed correctly
+## While not as consequential for propensity-score matching, it is important 
+## to preprocess the data set before running CEM and convert to factors all 
+## non-numeric covariates to ensure that "binning" is performed correctly:
+
 nsw_PSID_cem <- 
   nsw_PSID %>%
     mutate_at(vars(black, hispanic, married, nodegree), ~as.factor(.)) %>% 
     as.data.frame
 
+# Balance checking via cem package
 cem::imbalance(group = nsw_PSID_cem$treat, 
                data  = nsw_PSID_cem,
                drop  = c("treat", "re78", "data_id"))
 ```
 
 L1 statistic from the output above measures differences between the uni- (and multi-) dimensional histograms 
-of all covariates in the two groups. 
-Perfect (up to discretization) global balance result in L1 = 0. Whereas, L1 = 1 indicates complete separation of 
-the multidimensional histograms. Any value in the interval (0, 1) indicates the amount of difference between 
-frequencies of units in strata for each coarsened covariate of the two groups.
+of all covariates in the two groups. Perfect (up to discretization) global balance result in L1 = 0. 
+Whereas, L1 = 1 indicates complete separation of the multidimensional histograms. Any value in the interval 
+(0, 1) indicates the amount of difference between frequencies of units in strata for each coarsened 
+covariate of the two groups.
 
 In our case, the multivariate imbalanced measure (L1) is close to 1, suggesting an almost complete separation. 
 The differences in the empirical quantiles of the two distributions (same as eQQ statistics reported by `MatchIt`) 
@@ -611,18 +611,38 @@ m_cem_out <-
            cutpoints = list(education = edu_cut,
                             re75 = re_cut))  
 m_cem_out
-
-# m_cem_out$breaks
 ```
 
 Note that, unlike NNM example in `MatchIt`, CEM method dropped a few (`r m_cem_out$tab["Unmatched","G1"]`) treated units 
-(and a vast majority of control units) on strata that did not have any comparables from the other groups. (Note that we could've specified `discard = "both"` in `matchit()` to remove units that fall outside of some measure of support before matching). 
+and a vast majority of control units in strata that did not have any comparables from the other groups. (Note that we could've specified `discard = "both"` in `matchit()` to remove units that fall outside of some measure of support before matching). 
+
+`cem()` used prespecified breaks for the corresponding variables and calculated the breaks automatically for the rest:
+
+```{r}
+m_cem_out$breaks
+```
+
+We can also explore how the subjects were matched:
+
+```{r}
+# Strata that had at least one treatment and one control subject
+m_cem_out$mstrataID
+
+nsw_PSID_cem %>%
+  mutate(strata_num = m_cem_out$mstrata) %>%
+  arrange(strata_num) %>%
+  select(-data_id) %>%
+  kable %>%
+  kable_styling() %>%
+  scroll_box(width = "800", height = "400px")
+
+```
 
 Let's examine the resulting balance:
 
 ```{r}
 cobalt::bal.tab(m_cem_out,
-                data =  nsw_PSID_cem, # Data must be specified if we work with `cem` objects
+                data =  nsw_PSID_cem, # Data must be specified for `cem` objects
                 disp.means = T,
                 disp.sds = T,
                 stats = c("mean.diffs", "variance.ratios", "ks.statistics"))
@@ -635,13 +655,35 @@ cobalt::love.plot(m_cem_out,
                   abs = TRUE,
                   var.order = "unadjusted", 
                   grid = T,
-                  sample.names = c("Unmatched", "Matched"),
-                  colors = c("red", "blue"))
+                  sample.names = c("Matched", "Unmatched"),
+                  colors = c("blue", "red"))
 ```
 <!-- Matched ESS - effective sample size -->
 
 We've achieved a much better balance. However, lost many degrees of freedom by considerably 
-pruning the treated group. 
+pruning the treated group. Also, note that since we dropped quite a few units from the treatment group, 
+our target population of treated units have changed and we need to acknowledge that and disclose 
+when reporting the results of the analysis.
+
+## Estimating ATT with `cem` 
+
+Because `cem` results in a *stratified data set*, we have to use a special function `cem::att()` 
+(which stands for "Average Treatment effect on the Treated") to estimate the treatment effect. 
+It takes CEM output and applies a `model` of user's choice, using a specified `formula`:
+
+```{r}
+## Need to exclude hispanic from the model as none were matched
+est <- att(m_cem_out, 
+           re78 ~ treat + age + education + black + #hispanic
+             nodegree + married + re74 + re75, 
+           data = nsw_PSID_cem)
+summary(est)
+```
+
+The estimate of the treatment effect (\$`r round(est$att.model["Estimate","treat"])`) is very close to the one 
+obtained from the randomized experiment.
+
+For more on `cem` package check out [Iacus, King, Porro, 2009, "CEM: Software for Coarsened Exact Matching." Journal of Statistical Software](https://gking.harvard.edu/files/gking/files/jss-paper.pdf).
 
 ## Exercise 2*
 
@@ -689,26 +731,6 @@ the algorithm considers the numerical values associated to each level of the var
 
 </div>
 </details>
-
-## Estimating ATT with `cem` 
-
-Because `cem` results in a *stratified data set*, we have to use a special function `cem::att()` 
-(which stands for "Average Treatment effect on the Treated") to estimate the treatment effect. 
-It takes CEM output and applies a `model` of user's choice, using a specified `formula`:
-
-```{r}
-## Note that we need to exclude hispanic from the model
-est <- att(m_cem_out, 
-           re78 ~ treat + age + education + black + #hispanic
-             nodegree + married + re74 + re75, 
-           data = nsw_PSID_cem)
-summary(est)
-```
-
-The estimate of the treatment effect (\$`r round(est$att.model["Estimate","treat"])`) is very close to the one 
-obtained from the randomized experiment.
-
-For more on `cem` package check out [Iacus, King, Porro, 2009, "CEM: Software for Coarsened Exact Matching." Journal of Statistical Software](https://gking.harvard.edu/files/gking/files/jss-paper.pdf).
 
 ## Conclusion
 
